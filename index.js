@@ -32,47 +32,29 @@ app.post('/scrape', upload.single('file'), async (req, res) => {
       console.log(`\nProcessing ${index + 1}/${companies.length}: ${company['Company Name']}`);
       const result = await processCompany(company);
       results.push(result);
-      
-      // Randomized delay between 3-10 seconds
-      await delay(3000 + Math.random() * 7000);
+      await delay(5000 + Math.random() * 10000);
     }
 
     sendExcelResponse(res, results);
   } catch (error) {
-    console.error('\n!!! SCRAPING FAILED !!!', error);
-    res.status(500).json({ 
-      error: 'Scraping failed',
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  } finally {
-    await closeBrowser();
+    // ... [existing error handling] ...
   }
 });
 
 // Company processing logic
 async function processCompany(company) {
   try {
-    const query = `site:zoominfo.com inurl:/c/ intext:revenue ${company['Company Name']} ${company.Domain}`;
+    const query = `site:zoominfo.com inurl:/c/ intext:Headquarters ${company['Company Name']} ${company.Domain}`;
     console.log(`Search Query: "${query}"`);
 
-    // Get ZoomInfo URL
-    const zoominfoUrl = await scrapeGoogle(query, company['Company Name']);
-    console.log('Found ZoomInfo URL:', zoominfoUrl || 'Not found');
+    // Scrape directly from Google results
+    const data = await scrapeGoogle(query, company['Company Name']);
     
-    if (!zoominfoUrl) return createDefaultResult(company);
-
-    // Scrape ZoomInfo page
-    console.log('Scraping ZoomInfo page...');
-    const { name, domain, revenue } = await scrapeZoomInfo(zoominfoUrl);
-    
-    console.log('Scraped Data:', {
-      name: name || '-',
-      domain: domain || '-',
-      revenue: revenue || '-'
+    return formatResult(company, data?.url, {
+      name: data?.name || '-',
+      domain: data?.domain || '-',
+      revenue: data?.revenue || '-'
     });
-
-    return formatResult(company, zoominfoUrl, { name, domain, revenue });
   } catch (error) {
     console.error(`Processing failed: ${error.message}`);
     return createDefaultResult(company);

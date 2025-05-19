@@ -8,7 +8,8 @@ const initBrowser = async () => {
   if (!browser) {
     browser = await puppeteer.launch({
       headless: false,
-      args: ['--no-sandbox', '--window-size=1400,900']
+      args: ['--no-sandbox', '--window-size=1400,900'],
+      defaultViewport: null
     });
   }
   return browser;
@@ -19,37 +20,75 @@ const scrapeGoogle = async (query, companyName) => {
   const page = await browser.newPage();
   
   try {
-    // Natural navigation flow
-    await page.goto('https://www.google.com', { 
-      waitUntil: 'networkidle2', 
+    await page.goto('https://www.google.com ', { 
+      waitUntil: 'networkidle0',
       timeout: 60000 
     });
-    
-    // Type query like human
+
+    await page.waitForSelector('textarea[name="q"]', { timeout: 10000 });
     await page.type('textarea[name="q"]', query, { delay: 100 });
     await page.keyboard.press('Enter');
 
-    // CAPTCHA handling
-    const captchaSolved = await page.waitForFunction(() => {
-      const captcha = document.querySelector('#captcha-form, #recaptcha');
-      const results = document.querySelector('div.MjjYud');
-      return !captcha && results;
-    }, { timeout: 300000 });
+    await page.waitForSelector('div#search', { timeout: 30000 });
 
-    // Extract first valid result
-    const result = await page.evaluate(() => {
-      const results = Array.from(document.querySelectorAll('div.MjjYud a'))
-        .filter(a => {
-          const href = a.href;
-          return href.includes('zoominfo.com/c/') && 
-                 !href.includes('similar-companies') &&
-                 a.querySelector('h3.LC20lb');
-        });
-      return results[0]?.href;
-    });
+    const captchaExists = await page.$('#captcha-form, #recaptcha');
+    if (captchaExists) {
+      await page.screenshot({ path: 'captcha_error.png' });
+      throw new Error('CAPTCHA detected');
+    }
 
-    console.log('Google Result:', result);
-    return result || null;
+    const rawData = await page.evaluate((companyName) => {
+      const results = Array.from(document.querySelectorAll('div.MjjYud'));
+      return results.map(result => {
+        const title = result.querySelector('h3')?.innerText.trim() || '';
+        const snippet = result.querySelector('.VwiC3b')?.innerText.trim() || '';
+        const link = result.querySelector('a')?.href.trim() || '';
+        return { title, snippet, link };
+      });
+    }, companyName);
+
+    console.log('Raw data from Google:', rawData);
+
+    // Find best matching result
+    const validResults = rawData.filter(item => 
+      item.link.includes('zoominfo.com/c/') &&
+      !item.link.includes('similar-companies') &&
+      (item.title.toLowerCase().includes(companyName.toLowerCase()) || 
+       item.snippet.toLowerCase().includes(companyName.toLowerCase()))
+    );
+
+    if (validResults.length === 0) {
+      console.log('No valid ZoomInfo results found');
+      return null;
+    }
+
+    const bestMatch = validResults[0];
+
+    // Extract domain from snippet
+    const domainMatch = bestMatch.snippet.match(
+      /(?:website|site|domain)\s*:\s*(https?:\/\/)?([^\/\s]+)/gi
+    )?.[0] || bestMatch.snippet.match(
+      /www\.[a-zA-Z0-9-]+\.[a-zA-Z]{2,}/gi
+    )?.[0] || '-';
+
+    // Clean domain value
+    const cleanDomain = domainMatch
+      .replace(/^(website|site|domain)\s*:\s*/i, '')
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '')
+      .trim();
+
+    // Extract revenue
+    const revenueMatch = bestMatch.snippet.match(
+      /\$[\d.,]+\s*(million|billion|thousand|m|b|k)?/gi
+    );
+
+    return {
+      name: bestMatch.title,
+      domain: cleanDomain || '-',
+      revenue: revenueMatch ? revenueMatch[0] : '-',
+      url: bestMatch.link
+    };
 
   } catch (error) {
     console.error('Google search failed:', error.message);

@@ -2,39 +2,50 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
-const scrapeGoogle = async (query, companyName) => {
-  let browser;
-  try {
+let browser = null;
+
+const initBrowser = async () => {
+  if (!browser) {
     browser = await puppeteer.launch({
       headless: false,
       args: ['--no-sandbox', '--window-size=1400,900']
     });
+  }
+  return browser;
+};
 
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-    
-    // Direct navigation to search URL
-    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, {
-      waitUntil: 'networkidle2',
-      timeout: 120000
+const scrapeGoogle = async (query, companyName) => {
+  const browser = await initBrowser();
+  const page = await browser.newPage();
+  
+  try {
+    // Natural navigation flow
+    await page.goto('https://www.google.com', { 
+      waitUntil: 'networkidle2', 
+      timeout: 60000 
     });
+    
+    // Type query like human
+    await page.type('textarea[name="q"]', query, { delay: 100 });
+    await page.keyboard.press('Enter');
 
     // CAPTCHA handling
-    if (await page.$('#captcha-form, #recaptcha')) {
-      console.log(`\n🔴 SOLVE CAPTCHA FOR: ${companyName}`);
-      await page.waitForFunction(() => !document.querySelector('#captcha-form'), {
-        timeout: 300000
-      });
-    }
+    const captchaSolved = await page.waitForFunction(() => {
+      const captcha = document.querySelector('#captcha-form, #recaptcha');
+      const results = document.querySelector('div.MjjYud');
+      return !captcha && results;
+    }, { timeout: 300000 });
 
-    // Wait for results
-    await page.waitForSelector('div.g', { timeout: 30000 });
-
-    // Get first valid ZoomInfo link
+    // Extract first valid result
     const result = await page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('div.g a[href*="zoominfo.com/c/"]'))
-        .filter(a => !a.href.includes('/similar-companies'));
-      return links[0]?.href;
+      const results = Array.from(document.querySelectorAll('div.MjjYud a'))
+        .filter(a => {
+          const href = a.href;
+          return href.includes('zoominfo.com/c/') && 
+                 !href.includes('similar-companies') &&
+                 a.querySelector('h3.LC20lb');
+        });
+      return results[0]?.href;
     });
 
     console.log('Google Result:', result);
@@ -44,8 +55,15 @@ const scrapeGoogle = async (query, companyName) => {
     console.error('Google search failed:', error.message);
     return null;
   } finally {
-    if (browser) await browser.close();
+    await page.close();
   }
 };
 
-module.exports = { scrapeGoogle };
+const closeBrowser = async () => {
+  if (browser) {
+    await browser.close();
+    browser = null;
+  }
+};
+
+module.exports = { scrapeGoogle, closeBrowser };

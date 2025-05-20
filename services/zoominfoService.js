@@ -1,46 +1,38 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
-const cheerio = require('cheerio');
+const { initBrowser } = require('./googleService');
 
 const scrapeZoomInfo = async (url) => {
-  let browser;
-  try {
-    browser = await puppeteer.launch({
-      headless: false,
-      args: ['--no-sandbox']
-    });
+  const browser = await initBrowser();
+  const page = await browser.newPage();
 
-    const page = await browser.newPage();
+  try {
     await page.goto(url, { 
       waitUntil: 'networkidle2',
       timeout: 120000
     });
 
     // Wait for critical elements
-    await page.waitForSelector('h1', { timeout: 30000 });
+    await page.waitForSelector('h1.LC20lb', { timeout: 30000 });
     
-    const html = await page.content();
-    const $ = cheerio.load(html);
+    return await page.evaluate(() => {
+      const getText = (selector) => 
+        document.querySelector(selector)?.textContent?.trim() || '-';
 
-    // Verified selectors (Jan 2024)
-    const name = $('h1').first().text().trim();
-    const domain = $('a[data-testid="company-website"]').attr('href') 
-                 || $('a:contains("Website")').attr('href');
-    const revenue = $('div:contains("Revenue") + div, dt:contains("Revenue") + dd')
-      .text().trim().replace(/\s+/g, ' ');
-
-    return {
-      name: name || '-',
-      domain: domain || '-',
-      revenue: revenue || '-'
-    };
+      return {
+        name: getText('h1.LC20lb'),
+        domain: getText('a[data-testid="company-website"]') || 
+               getText('a:contains("Website")'),
+        revenue: getText('*:contains("Revenue") + div, dt:contains("Revenue") + dd')
+      };
+    });
 
   } catch (error) {
-    console.error('ZoomInfo scraping failed:', error.message);
+    console.error('ZoomInfo error:', error.message);
     return { name: '-', domain: '-', revenue: '-' };
   } finally {
-    if (browser) await browser.close();
+    await page.close();
   }
 };
 

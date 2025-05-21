@@ -1,93 +1,53 @@
+// index.js
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const { readCompaniesFromExcel } = require('./services/excelService');
-const { scrapeGoogle, closeBrowser } = require('./services/googleService');
-const { scrapeZoomInfo } = require('./services/zoominfoService');
+const { scrapeCompany } = require('./services/googleService');
 const XLSX = require('xlsx');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
-// Middleware setup
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Browser cleanup on exit
 process.on('SIGINT', async () => {
   await closeBrowser();
   process.exit();
 });
 
-// Main scraping endpoint
 app.post('/scrape', upload.single('file'), async (req, res) => {
   try {
     const companies = await readCompaniesFromExcel(req.file.path);
+    
+    // Validate required columns
+    if (!companies[0]?.input_name || !companies[0]?.input_domain) {
+      throw new Error('Excel must have "input_name" and "input_domain" columns');
+    }
+
     const results = [];
     
-    console.log(`\n=== Starting scrape for ${companies.length} companies ===`);
-    
-    for (const [index, company] of companies.entries()) {
-      console.log(`\nProcessing ${index + 1}/${companies.length}: ${company['Company Name']}`);
-      const result = await processCompany(company);
+    for (const company of companies) {
+      console.log(`Processing: ${company.input_name} (${company.input_domain})`);
+      const result = await scrapeCompany(company);
       results.push(result);
-      await delay(5000 + Math.random() * 10000);
+      await delay(10000);
     }
 
     sendExcelResponse(res, results);
   } catch (error) {
-    // ... [existing error handling] ...
+    res.status(500).json({ 
+      error: 'Scraping failed',
+      message: error.message,
+      details: error.stack
+    });
   }
 });
 
-// Company processing logic
-async function processCompany(company) {
-  try {
-    const query = `site:zoominfo.com inurl:/c/ intext:Headquarters ${company['Company Name']} ${company.Domain}`;
-    console.log(`Search Query: "${query}"`);
-
-    // Scrape directly from Google results
-    const data = await scrapeGoogle(query, company['Company Name']);
-    
-    return formatResult(company, data?.url, {
-      name: data?.name || '-',
-      domain: data?.domain || '-',
-      revenue: data?.revenue || '-'
-    });
-  } catch (error) {
-    console.error(`Processing failed: ${error.message}`);
-    return createDefaultResult(company);
-  }
-}
-
-// Helper functions
-function createDefaultResult(company) {
-  return {
-    'Given Company Name': company['Company Name'],
-    'Given Domain': company.Domain,
-    'Result URL': '-',
-    'Company Name': '-',
-    'Domain': '-',
-    'Revenue': '-'
-  };
-}
-
-function formatResult(company, url, data) {
-  return {
-    'Given Company Name': company['Company Name'],
-    'Given Domain': company.Domain,
-    'Result URL': url,
-    'Company Name': data.name || '-',
-    'Domain': data.domain || '-',
-    'Revenue': (data.revenue || '-').replace(/\s+/g, ' ')
-  };
-}
-
 function sendExcelResponse(res, data) {
   try {
-    console.log('\nGenerating Excel file...');
-    
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Results');
@@ -98,14 +58,12 @@ function sendExcelResponse(res, data) {
       bookSST: false
     });
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats');
     res.setHeader('Content-Disposition', 'attachment; filename=scraping-results.xlsx');
     res.end(buffer);
     
-    console.log('Excel file generated successfully');
   } catch (error) {
-    console.error('Excel generation failed:', error);
-    throw new Error('Failed to generate Excel file: ' + error.message);
+    throw new Error('Excel generation failed: ' + error.message);
   }
 }
 
@@ -113,9 +71,7 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Server startup
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\n=== Server running on http://localhost:${PORT} ===`);
-  console.log('Ready to accept Excel file uploads');
+  console.log(`Server running on http://localhost:${PORT}`);
 });

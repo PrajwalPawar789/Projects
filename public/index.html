@@ -3,10 +3,28 @@
 <head>
     <title>ZoomInfo Scraper</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; padding: 20px; }
-        .upload-box { border: 2px dashed #ccc; padding: 20px; text-align: center; margin: 20px 0; }
-        input[type="file"] { margin: 10px 0; }
-        button { background: #007bff; color: white; border: none; padding: 10px 20px; cursor: pointer; }
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 600px; 
+            margin: 20px auto; 
+            padding: 20px; 
+        }
+        .upload-box { 
+            border: 2px dashed #ccc; 
+            padding: 20px; 
+            text-align: center; 
+            margin: 20px 0; 
+        }
+        input[type="file"] { 
+            margin: 10px 0; 
+        }
+        button { 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            cursor: pointer; 
+        }
     </style>
 </head>
 <body>
@@ -21,21 +39,44 @@
     <script>
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const formData = new FormData();
-            formData.append('file', document.getElementById('excelFile').files[0]);
+            const fileInput = document.getElementById('excelFile');
+            const file = fileInput.files[0];
             
+            if (!file) {
+                alert('Please select a valid Excel file (.xlsx)');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
             try {
-                const response = await fetch('/scrape', { method: 'POST', body: formData });
+                const response = await fetch('/scrape', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error);
+                }
+
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'results.xlsx';
+                a.download = 'scraping-results.xlsx';
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
+                alert('Download initiated successfully!');
+                
             } catch (error) {
                 alert('Error: ' + error.message);
+                console.error('Scrape failed:', error);
             }
         });
     </script>

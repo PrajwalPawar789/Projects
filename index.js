@@ -1,4 +1,3 @@
-// index.js
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -28,7 +27,7 @@ const processExcel = (filePath) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     return xlsx.utils.sheet_to_json(sheet).map(row => ({
       input_name: row['Company Name']?.toString().trim(),
-      input_domain: row['Domain']?.toString().toLowerCase().trim()
+      input_domain: (row['Domain']?.toString().toLowerCase().trim() || '').replace(/^https?:\/\/(www\.)?/, '')
     })).filter(company => company.input_name && company.input_domain);
   } catch (error) {
     throw new Error(`Excel processing failed: ${error.message}`);
@@ -43,11 +42,7 @@ const generateOutput = (results) => {
     'Result Domain': r.result_domain,
     'Full Address': r.full_address,
     'Revenue': r.revenue,
-    'Employees': r.employees,
     'HQ Link': r.hq_link,
-    'Revenue Link': r.revenue_link,
-    'Employees Link': r.employees_link,
-    'Link Consistency': r.link_consistency,
     'Error': r.error
   }));
   
@@ -69,36 +64,47 @@ app.post('/scrape', upload.single('file'), async (req, res) => {
 
     const results = [];
     const client = await pool.connect();
-
+    
     try {
-      for (const [index, company] of companies.entries()) {
-        console.log(`Processing ${index + 1}/${companies.length}: ${company.input_name}`);
-        
-        const result = await scrapeCompany(company);
-        results.push(result);
+      const CHUNK_SIZE = 10;
+      const DELAY_MS = 1000;
+      
+      for (let i = 0; i < companies.length; i += CHUNK_SIZE) {
+        const chunk = companies.slice(i, i + CHUNK_SIZE);
+        console.log(`Processing chunk ${i / CHUNK_SIZE + 1} of ${Math.ceil(companies.length / CHUNK_SIZE)}`);
 
-        await client.query(`
-          INSERT INTO company_data (
-            given_company_name, given_domain, result_company_name, 
-            result_domain, full_address, revenue, employees, 
-            hq_link, revenue_link, employees_link, link_consistency, error
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        `, [
-          company.input_name,
-          company.input_domain,
-          result.result_company_name || '-',
-          result.result_domain || '-',
-          result.full_address || '-',
-          result.revenue || '-',
-          result.employees || '-',
-          result.hq_link || '-',
-          result.revenue_link || '-',
-          result.employees_link || '-',
-          result.link_consistency || '-',
-          result.error || null
-        ]);
+        const chunkResults = await Promise.all(
+          chunk.map(async (company, chunkIndex) => {
+            const globalIndex = i + chunkIndex;
+            console.log(`Processing ${globalIndex + 1}/${companies.length}: ${company.input_name}`);
+            return scrapeCompany(company);
+          })
+        );
 
-        if (index < companies.length - 1) await new Promise(resolve => setTimeout(resolve, 10000));
+        results.push(...chunkResults);
+        await Promise.all(
+          chunkResults.map(result => 
+            client.query(`
+              INSERT INTO company_data (
+                given_company_name, given_domain, result_company_name, 
+                result_domain, full_address, revenue, hq_link, error
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `, [
+              result.given_company_name,
+              result.given_domain,
+              result.result_company_name,
+              result.result_domain,
+              result.full_address,
+              result.revenue,
+              result.hq_link,
+              result.error
+            ])
+          )
+        );
+
+        if (i + CHUNK_SIZE < companies.length) {
+          await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+        }
       }
 
       const output = generateOutput(results);

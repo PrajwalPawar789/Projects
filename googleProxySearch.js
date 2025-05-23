@@ -1,20 +1,24 @@
 const axios = require('axios');
 
-// Replace with YOUR actual API key
+// Replace with YOUR API key and proxy endpoint
 const API_KEY = 'da222bf17697df8ba02e44aa5f9b30fc';
+const API_ENDPOINT = 'https://web-unblocker.abcproxy.com/v1'; // ✨ Use Web Unblocker endpoint
 
 const params = {
-  engine: "google",
-  q: "accorjobs.com",
+  url: 'https://www.zoominfo.com/c/908-devices-inc/355354369', // ✨ Target URL
   api_key: API_KEY,
-  output: "json", // Explicitly request JSON
-  fetch_mode: "static" // Required parameter
+  output: "json",
+  render_js: "true", // ✨ Required for JavaScript-heavy sites
+  autoparse: "true", // ✨ Automatically structure unstructured data
+  proxy_type: "residential", // ✨ Use residential IPs to avoid blocks
+  wait_for: "selector:.company-summary", // ✨ Wait for specific content to load
+  timeout: 30000 // ✨ Increase timeout for slow pages
 };
 
-axios.get("https://serpapi.abcproxy.com/search", { params })
+axios.get(API_ENDPOINT, { params })
   .then(response => {
     console.log("✅ Successful response:");
-    console.log(response.data);
+    console.log(JSON.stringify(response.data, null, 2)); // Pretty-print JSON
   })
   .catch(error => {
     console.error("❌ Full Error:", {

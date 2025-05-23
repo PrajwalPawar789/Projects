@@ -1,133 +1,97 @@
 // googleService.js
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteer.use(StealthPlugin());
+const axios = require('axios');
+const cheerio = require('cheerio');
 
-let browser = null;
+const API_KEY = 'da222bf17697df8ba02e44aa5f9b30fc';
 
-const initBrowser = async () => {
-  if (!browser) {
-    browser = await puppeteer.launch({
-      headless: false,
-      args: ['--no-sandbox', '--window-size=1400,900'],
-      defaultViewport: null
-    });
+const parseHtml = async (htmlUrl) => {
+  try {
+    const { data: html } = await axios.get(htmlUrl);
+    const $ = cheerio.load(html);
+    
+    const result = $('div.g, div.MjjYud').first();
+    const title = result.find('h3').text().trim();
+    const snippet = result.find('.VwiC3b').text().trim();
+    const link = result.find('a').attr('href') || '-';
+
+    return {
+      companyName: title.split(' - ')[0]?.replace('...', '') || '-',
+      domain: (snippet.match(/(Website|Domain):?\s*(?:https?:\/\/)?(?:www\.)?([\w-]+\.[a-z]{2,})/i) || [])[2] || '-',
+      address: (snippet.match(/(Headquarters|Location):?\s*([\w\s,.-]+)/i) || [])[2]?.trim() || '-',
+      revenue: (snippet.match(/\$[\d.,]+\s*(million|billion|thousand|m|b|k)?/i) || [])[0] || '-',
+      employees: (snippet.match(/(\d+)\s+employees/i) || [])[1] || '-',
+      link: link.startsWith('/url?') ? new URLSearchParams(link.split('?')[1]).get('q') : link
+    };
+  } catch (error) {
+    console.error('HTML parsing error:', error);
+    return null;
   }
-  return browser;
 };
 
-const scrapeSearch = async (page, keyword, company) => {
+const scrapeSearch = async (query) => {
   try {
-    const query = `site:zoominfo.com/c/ intext:${keyword} ` +
-                  `${company.input_name} ${company.input_domain}`;
-    
-    await page.goto('https://www.google.com ', { 
-      waitUntil: 'networkidle0',
-      timeout: 60000 
+    const response = await axios.get('https://serpapi.abcproxy.com/search', {
+      params: {
+        engine: 'google',
+        q: query,
+        api_key: API_KEY,
+        output: 'json',
+        fetch_mode: 'static'
+      },
+      timeout: 20000
     });
-    
-    await page.waitForSelector('textarea[name="q"]', { timeout: 10000 });
-    await page.type('textarea[name="q"]', query, { delay: 100 });
-    await page.keyboard.press('Enter');
-    
-    try {
-      await page.waitForSelector('div#search', { timeout: 60000 });
-    } catch (err) {
-      await page.screenshot({ path: `debug_${keyword}_${Date.now()}.png` });
-      throw new Error(`Timeout on ${keyword} search`);
-    }
 
-    return await page.evaluate((keyword) => {
-      const result = document.querySelector('div.MjjYud');
-      const snippet = result?.querySelector('.VwiC3b')?.innerText || '';
-      const title = result?.querySelector('h3')?.innerText || '';
-      const link = result?.querySelector('a')?.href || '-';
-      
-// In googleService.js scrapeSearch function
-const addressMatch = snippet.match(
-  /headquarters.*?(?:[:.]|located at|in)\s+([\d\w\s,.-]+)/i
-) || [];
-const cleanAddress = addressMatch[1]
-  ?.replace(/^(headquarters|located at|are|in)/gi, '')
-  .replace(/^\W+/, '') // Remove leading non-word characters
-  .trim();
-
-// In googleService.js scrapeSearch function
-const domainMatch = snippet.match(
-  /(?:website|domain|site|url)\D+?(https?:\/\/)?([\w.-]+\.[a-z]{2,})/i
-) || [];
-const domain = domainMatch[2] 
-  ? domainMatch[2].replace(/^www\./i, '') // Remove www prefix
-  : '-';
-
-      // Company name from title
-      const companyName = title.split(' - ')[0]?.trim() || '-';
-
-      return {
-        data: snippet,
-        link,
-        address: cleanAddress || '-',
-        domain: domain || '-',
-        companyName: companyName || '-'
-      };
-
-    }, keyword);
-
+    const htmlUrl = response.data.data?.search_metadata?.raw_html_file;
+    return htmlUrl ? await parseHtml(htmlUrl) : null;
   } catch (error) {
-    return {
-      data: '-',
-      link: '-',
-      address: '-',
-      domain: '-',
-      companyName: '-'
-    };
+    console.error('API request failed:', error.message);
+    return null;
   }
 };
 
 const scrapeCompany = async (company) => {
-  const browser = await initBrowser();
-  
+  const resultTemplate = {
+    given_company_name: company.input_name,
+    given_domain: company.input_domain,
+    result_company_name: '-',
+    result_domain: '-',
+    full_address: '-',
+    revenue: '-',
+    employees: '-',
+    hq_link: '-',
+    revenue_link: '-',
+    employees_link: '-',
+    link_consistency: 'Inconsistent',
+    error: null
+  };
+
   try {
-    const [pageHQ, pageRev, pageEmp] = await Promise.all([
-      browser.newPage(),
-      browser.newPage(),
-      browser.newPage()
-    ]);
-
     const [hq, rev, emp] = await Promise.all([
-      scrapeSearch(pageHQ, 'Headquarters', company),
-      scrapeSearch(pageRev, 'Revenue', company),
-      scrapeSearch(pageEmp, 'Employees', company)
+      scrapeSearch(`site:zoominfo.com/c/ intext:"Headquarters" ${company.input_name} ${company.input_domain}`),
+      scrapeSearch(`site:zoominfo.com/c/ intext:"Revenue" ${company.input_name} ${company.input_domain}`),
+      scrapeSearch(`site:zoominfo.com/c/ intext:"Employees" ${company.input_name} ${company.input_domain}`)
+    
     ]);
 
-    await Promise.all([
-      pageHQ.close(),
-      pageRev.close(),
-      pageEmp.close()
-    ]);
+    if (!hq || !rev || !emp) {
+      throw new Error('Partial data missing from API responses');
+    }
 
-    // Get best values from all searches
     return {
-      given_company_name: company.input_name,
-      given_domain: company.input_domain,
-      result_company_name: [hq.companyName, rev.companyName, emp.companyName].find(v => v !== '-'),
-      result_domain: [hq.domain, rev.domain, emp.domain].find(v => v !== '-'),
-      full_address: hq.address || '-',
-      revenue: rev.data.match(/\$[\d.,]+\s*(million|billion|thousand|m|b|k)?/i)?.[0] || '-',
-      employees: emp.data.match(/(\d+)\s+employees/i)?.[1] || '-',
+      ...resultTemplate,
+      result_company_name: [hq.companyName, rev.companyName, emp.companyName].find(v => v !== '-') || '-',
+      result_domain: [hq.domain, rev.domain, emp.domain].find(v => v !== '-') || '-',
+      full_address: hq.address,
+      revenue: rev.revenue,
+      employees: emp.employees,
       hq_link: hq.link,
       revenue_link: rev.link,
       employees_link: emp.link,
-      link_consistency: 
-        (hq.link === rev.link && hq.link === emp.link) 
-          ? 'Consistent' 
-          : 'Inconsistent'
+      link_consistency: [hq.link, rev.link, emp.link].every(l => l === hq.link) ? 'Consistent' : 'Inconsistent'
     };
-
   } catch (error) {
     return {
-      given_company_name: company.input_name,
-      given_domain: company.input_domain,
+      ...resultTemplate,
       error: error.message
     };
   }

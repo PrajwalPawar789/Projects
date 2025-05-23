@@ -1,44 +1,25 @@
-const cheerio = require('cheerio');
-const fs = require('fs'); // Add filesystem module
+const axios = require('axios');
 
-const API_KEY = '4f8df42a5f10339c3f759265a9033816';
-const searchQuery = 'site:zoominfo.com inurl:/c/ intext:Headquarters RevX revx.io';
-const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
-const encodedUrl = encodeURIComponent(googleSearchUrl);
-const proxyUrl = `https://api.scraperapi.com/?api_key=${API_KEY}&url=${encodedUrl}`;
+// Replace with YOUR actual API key
+const API_KEY = 'da222bf17697df8ba02e44aa5f9b30fc';
 
-async function scrapeGoogle() {
-  try {
-    const response = await fetch(proxyUrl);
-    const html = await response.text();
+const params = {
+  engine: "google",
+  q: "accorjobs.com",
+  api_key: API_KEY,
+  output: "json", // Explicitly request JSON
+  fetch_mode: "static" // Required parameter
+};
 
-    // 1. Save raw HTML to file
-    fs.writeFileSync('output.html', html); // Check this file for CAPTCHAs/blocks
-    console.log('Raw HTML saved to output.html');
-
-    // 2. Parse results
-    const $ = cheerio.load(html);
-    const results = [];
-
-    // Updated selector (Google often changes HTML structure)
-    $('div.g, div.yuRUbf').each((i, el) => { // Try multiple selectors
-      const title = $(el).find('h3, div.MBeuO').first().text(); // Updated title selector
-      const link = $(el).find('a').attr('href');
-      const snippet = $(el).find('div.VwiC3b, span.HwtpBd').text(); // Alternate snippet selector
-      
-      if (title && link) {
-        results.push({
-          title: title.trim(),
-          link: link.startsWith('/') ? `https://www.google.com${link}` : link, // Fix relative links
-          snippet: snippet.trim()
-        });
-      }
+axios.get("https://serpapi.abcproxy.com/search", { params })
+  .then(response => {
+    console.log("✅ Successful response:");
+    console.log(response.data);
+  })
+  .catch(error => {
+    console.error("❌ Full Error:", {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
     });
-
-    console.log('✅ Results:', results.length > 0 ? results : 'No results found');
-  } catch (error) {
-    console.error('❌ Error:', error.message);
-  }
-}
-
-scrapeGoogle();
+  });

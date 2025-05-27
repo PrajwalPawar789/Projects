@@ -66,7 +66,7 @@ app.post('/scrape', upload.single('file'), async (req, res) => {
     const client = await pool.connect();
     
     try {
-      const CHUNK_SIZE = 10;
+      const CHUNK_SIZE = 50;
       const DELAY_MS = 1000;
       
       for (let i = 0; i < companies.length; i += CHUNK_SIZE) {

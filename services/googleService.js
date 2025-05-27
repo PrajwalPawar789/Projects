@@ -1,6 +1,7 @@
 const axios = require('axios');
 
-const API_KEY = '1ccd151db8db14c30dd3d546ca48eaf7';
+const API_KEY = 'a44728c5a867c47161b92a9b53a8e1aa';
+
 
 
 const parseJsonResult = (result) => {
@@ -9,7 +10,7 @@ const parseJsonResult = (result) => {
     
 // Enhanced address extraction with multiple fallbacks
     const addressMatch = description.match(
-      /(?:Address|Headquarters|Location)[\s:.,-]*([^\n\r]+?)(?=\s*(?:Phone|Website|Revenue|$))/i
+      /(?:Address|Headquarters|Location|Office)[\s:.,-]*([^\n\r]+?)(?=\s*(?:Phone|Website|Revenue|$))/i
     ) || description.match(
       /Location[.:]\s*((?:.(?!\s*(?:Phone|Website|Revenue)))+)/si
     );
@@ -109,7 +110,10 @@ const scrapeCompany = async (company) => {
   };
 
   try {
-    const query = `site:zoominfo.com/c/ intext:"Headquarters" ${company.input_name} ${company.input_domain}`;
+        // const query = `site:zoominfo.com/c/ intext:Headquarters ${company.input_name} ${company.input_domain}`;
+    // const query = `site:rocketreach.co intext:address ${company.input_name} ${company.input_domain}`;
+    const query = `${company.input_name} + ${company.input_domain} + address`;
+
     const result = await scrapeSearch(query);
 
     if (!result) throw new Error('No headquarters data found');
